@@ -14,13 +14,8 @@ def compute_action_value(state, action, vtable, discount=0.9):
     return val
 
 def compute_opt_state_value(state, qtable):
-    max_val = 0
+    return np.max(qtable[state, :])
     
-    for a in state.legal_actions():
-        max_val = max(max_val, qtable[state, a])
-                
-    return max_val
-
 class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
     def __array__(self, dtype=None):
         assert dtype is None
@@ -59,46 +54,22 @@ class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
 class ActionValueTable(NumpyMixin):
     def __init__(
         self, n_actions,
-        states=None, values=None,
+        data=None, default_value=0,
         state_key_func=lambda s: np.asarray(s.observations()).tobytes() if hasattr(s, "observations")
-            else np.asarray(s).tobytes(),
-        init_val_func=lambda s, n_actions: np.zeros(n_actions),
-        default_value=0, action_values=None
+            else np.asarray(s).tobytes()
     ):
         self.n_actions = n_actions
         self.state_key_func = state_key_func
         self.default_value = default_value
         
-        if action_values is None:
-            index = []
-            data = []
-            
-            if states is None: states = []
-                
-            if not values is None:
-                if len(states) != len(values):
-                    raise ValueError("The length of the values array, if specified, must equal the number of states.")
-                
-                for s, s_vals in zip(states, values):
-                    if len(s_vals) != self.n_actions:
-                        raise ValueError("For each state, there must be as many values as there are actions.")
-                    
-                    s_key = self.state_key_func(s)
-                    index.append(s_key)
-                    data.append(s_vals)
-            else:
-                for s in states:
-                    s_key = self.state_key_func(s)
-                    index.append(s_key)
-                    data.append(init_val_func(s, self.n_actions))
-            
+        if data is None:
             self._action_values = pd.DataFrame(
-                data=data, index=index,
+                data=[], index=[],
                 columns=range(self.n_actions),
                 dtype=float
             )
         else:
-            self._action_values = action_values
+            self._action_values = data
     
     def copy(self):
         return copy.deepcopy(self)
@@ -174,6 +145,9 @@ class ActionValueTable(NumpyMixin):
         except KeyError:
             return default
     
+    def __contains__(self, key):
+        return self._proc_key(key) in self._action_values.index
+
     def __getitem__(self, key):
         if self.default_value is None:
             return self._action_values.loc[self._proc_key(key)]
@@ -201,9 +175,13 @@ class ActionValueTable(NumpyMixin):
     def __len__(self):
         return len(self._action_values)
 
-    def to_state_values(self, states):
-        return StateValueTable(states,
-            init_val_func=lambda s: compute_opt_state_value(s, self))
+    def to_state_values(self):
+        vtable = StateValueTable()
+
+        for obs in self.keys():
+            vtable[obs] = compute_opt_state_value(obs, self)
+
+        return vtable
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
         if method == '__call__' or method == 'accumulate':
@@ -234,28 +212,18 @@ class ActionValueTable(NumpyMixin):
     
 class StateValueTable(NumpyMixin):
     def __init__(
-        self, states=None, values=None,
+        self,
+        data=None, default_value=0, 
         state_key_func=lambda s: np.asarray(s.observations()).tobytes() if hasattr(s, "observations")
-            else np.asarray(s).tobytes(),
-        init_val_func=lambda s: 0,
-        default_value=0, state_values=None
+            else np.asarray(s).tobytes()
     ):
         self.state_key_func = state_key_func
         self.default_value = default_value
         
-        if state_values is None:
-            if states is None: states = []
-            if not values is None:
-                if len(states) != len(values):
-                    raise ValueError("The length of the values array, if specified, must equal the number of states.")
-                self._state_values = pd.Series(data=values,
-                    index=[self.state_key_func(s) for s in states], dtype=float)
-            else:
-                self._state_values = pd.Series(data=[init_val_func(s) for s in states],
-                                            index=[self.state_key_func(s) for s in states],
-                                            dtype=float)
+        if data is None:
+            self._state_values = pd.Series(data=[], index=[], dtype=float)
         else:
-            self._state_values = state_values
+            self._state_values = data
 
     def copy(self):
         return copy.deepcopy(self)
@@ -309,7 +277,10 @@ class StateValueTable(NumpyMixin):
     
     def get(self, state=None, default=None):
         return self._state_values.get(self._proc_key(state), default=default)
-    
+
+    def __contains__(self, key):
+        return self._proc_key(key) in self._state_values.index
+
     def __getitem__(self, state):
         if self.default_value is None:
             return self._state_values.loc[self._proc_key(state)]
@@ -336,11 +307,13 @@ class StateValueTable(NumpyMixin):
     
     def to_action_values(self, states, discount=0.9):
         n_actions = states[0].action_space.n
-        return ActionValueTable(n_actions, states,
-          init_val_func=lambda s, _: np.asarray([
-            compute_action_value(s, a, self, discount) for a in range(n_actions)
-          ])
-        )
+
+        qtable = ActionValueTable(n_actions)
+        for s in states:
+            if not s in self: continue
+            qtable[s] = [compute_action_value(s, a, self, discount) for a in range(n_actions)] 
+
+        return qtable
     
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
         if method == '__call__' or method == 'accumulate':
