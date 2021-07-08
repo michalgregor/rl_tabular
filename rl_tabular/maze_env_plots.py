@@ -93,7 +93,7 @@ def plot_state_values(vtable, states=None, env=None,
         interrupt = True
 
     if interrupt:
-        return KeyboardInterrupt()
+        raise KeyboardInterrupt()
 
 def plot_action_values(
     qtable, states, env=None,
