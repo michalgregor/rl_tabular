@@ -20,53 +20,65 @@ class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
     def __array__(self, dtype=None):
         assert dtype is None
         return self.values()
-    
-    def _reindex_table(self, table, index):
-        if isinstance(table, self.__class__):
-            if index is None:
-                index = table.data.index
-                table = table.data.values
-            else:
-                table = table.data.loc[index].values
         
-        return table, index
+    def _join_index(self, table, index):
+        if isinstance(table, self.__class__):
+            index = index.union(table.data.index)
+        return index
     
     def _ufunc_unwrap(self, inputs, kwargs):
-        index = None
-        inputs2 = []
-        
+        index = pd.Index([])
         for inp in inputs:
-            inp, index = self._reindex_table(inp, index)
-            inputs2.append(inp)
-                        
+            index = self._join_index(inp, index)
+
+        inputs2 = [
+            inp.data.reindex(index, fill_value=inp.default_value, copy=False).values
+                if isinstance(inp, self.__class__) else inp for inp in inputs
+        ]
+                                
         outputs = kwargs.pop('out', None)
         
         if outputs:
             outputs2 = []
             for out in outputs:
-                out, index = self._reindex_table(out, index)
+                if isinstance(out, self.__class__):
+                    out.data = out.data.reindex(index,
+                        fill_value=out.default_value, copy=False
+                    )
+                    out = out.data.values
                 outputs2.append(out)
 
             kwargs['out'] = tuple(outputs2)
         
-        return inputs2, kwargs
+        return inputs2, kwargs, index
+
+class StateKeyFunc:
+    def __init__(self, obs_dtype=np.int32):
+        self.dtype = obs_dtype
+
+    def __call__(self, s):
+        if hasattr(s, "observations"):
+            return np.asarray(s.observations(), dtype=self.dtype).tobytes()
+        else:
+            return np.asarray(s, dtype=self.dtype).tobytes()
 
 class ActionValueTable(NumpyMixin):
     def __init__(
         self, n_actions,
         data=None, default_value=0,
-        state_key_func=lambda s: np.asarray(s.observations()).tobytes() if hasattr(s, "observations")
-            else np.asarray(s).tobytes()
+        state_key_func=StateKeyFunc(),
+        dtype=float
     ):
         self.n_actions = n_actions
         self.state_key_func = state_key_func
         self.default_value = default_value
+        self.dtype = dtype
         
         if data is None:
             self._action_values = pd.DataFrame(
                 data=[], index=[],
                 columns=range(self.n_actions),
-                dtype=float
+                dtype=self.dtype
             )
         else:
             self._action_values = data
@@ -158,7 +170,7 @@ class ActionValueTable(NumpyMixin):
                 return self.default_value
     
     def __setitem__(self, key, value):
-        self._action_values.loc[self._proc_key(key)] = value
+        self._action_values.loc[self._proc_key(key)] = np.asarray(value, dtype=self.dtype)
         if not self.default_value is None:
             self._action_values.fillna(self.default_value, inplace=True)
     
@@ -185,25 +197,23 @@ class ActionValueTable(NumpyMixin):
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
         if method == '__call__' or method == 'accumulate':
-            inputs, kwargs = self._ufunc_unwrap(inputs, kwargs)
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
             func = getattr(ufunc, method)
                     
             return self.__class__(
                 self.n_actions,
-                states=None, values=None,
-                state_key_func=self.state_key_func,
-                init_val_func=None,
-                default_value=self.default_value,
-                action_values=pd.DataFrame(
+                data=pd.DataFrame(
                     data=func(*inputs, **kwargs),
-                    index=self.data.index,
+                    index=index,
                     columns=range(self.n_actions),
-                    dtype=float
-                )
+                    dtype=self.dtype
+                ),
+                default_value=self.default_value,
+                state_key_func=self.state_key_func
             )
         
         elif method == 'reduce':
-            inputs, kwargs = self._ufunc_unwrap(inputs, kwargs)
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
             res = ufunc.reduce(*inputs, **kwargs)
             return res
             
@@ -214,14 +224,15 @@ class StateValueTable(NumpyMixin):
     def __init__(
         self,
         data=None, default_value=0, 
-        state_key_func=lambda s: np.asarray(s.observations()).tobytes() if hasattr(s, "observations")
-            else np.asarray(s).tobytes()
+        state_key_func=StateKeyFunc(),
+        dtype=float
     ):
         self.state_key_func = state_key_func
         self.default_value = default_value
+        self.dtype = dtype
         
         if data is None:
-            self._state_values = pd.Series(data=[], index=[], dtype=float)
+            self._state_values = pd.Series(data=[], index=[], dtype=self.dtype)
         else:
             self._state_values = data
 
@@ -291,7 +302,7 @@ class StateValueTable(NumpyMixin):
                 return self.default_value
     
     def __setitem__(self, state, value):
-        self._state_values.loc[self._proc_key(state)] = value
+        self._state_values.loc[self._proc_key(state)] = np.asarray(value, dtype=self.dtype)
     
     def __delitem__(self, state):
         self._state_values.drop([self._proc_key(state)], inplace=True)
@@ -317,23 +328,21 @@ class StateValueTable(NumpyMixin):
     
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
         if method == '__call__' or method == 'accumulate':
-            inputs, kwargs = self._ufunc_unwrap(inputs, kwargs)
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
             func = getattr(ufunc, method)
             
             return self.__class__(
-                states=None, values=None,
-                state_key_func=self.state_key_func,
-                init_val_func=None,
-                default_value=self.default_value,
-                state_values=pd.Series(
+                data=pd.Series(
                     data=func(*inputs, **kwargs),
-                    index=self.data.index,
-                    dtype=float
-                )
+                    index=index,
+                    dtype=self.dtype
+                ),
+                default_value=self.default_value,
+                state_key_func=self.state_key_func
             )
         
         elif method == 'reduce':
-            inputs, kwargs = self._ufunc_unwrap(inputs, kwargs)
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
             res = ufunc.reduce(*inputs, **kwargs)
             return res
             
