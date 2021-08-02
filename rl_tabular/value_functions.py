@@ -59,6 +59,8 @@ class StateKeyFunc:
     def __call__(self, s):
         if hasattr(s, "observations"):
             return np.asarray(s.observations(), dtype=self.dtype).tobytes()
+        elif isinstance(s, bytes):
+            return s
         else:
             return np.asarray(s, dtype=self.dtype).tobytes()
 
