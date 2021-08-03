@@ -3,8 +3,7 @@ import matplotlib.pyplot as plt
 from gym_plannable.env.grid_world import Actor, MazeEnv
 from .states import collect_states
 
-def get_state_value_array(vtable, observation_space,
-                          states, default=0):
+def get_state_value_array(vtable, observation_space, states):
     low, high = observation_space.low, observation_space.high
     span = high - low
     assert len(span) == 2
@@ -12,13 +11,13 @@ def get_state_value_array(vtable, observation_space,
     
     for state in states:
         obs = state.observations() - low
-        value_array[obs[0], obs[1]] = vtable.get(state, default)
+        value_array[obs[0], obs[1]] = vtable[state]
         
     return value_array
 
 def get_action_value_array(
     qtable, observation_space, states,
-    actions=[0, 1, 2, 3], default=0
+    actions=[0, 1, 2, 3]
 ):
     low, high = observation_space.low, observation_space.high
     span = high - low
@@ -28,12 +27,11 @@ def get_action_value_array(
     for state in states:
         for action in actions:
             obs = state.observations() - low
-            value_array[obs[0], obs[1], action] = qtable.get(state, action, default)
-        
+            value_array[obs[0], obs[1], action] = qtable[state, action]
     return value_array
 
 def plot_state_values(vtable, states=None, env=None,
-                      default=0, ax=None, cmap='OrRd', render_env=True,
+                      ax=None, cmap='OrRd', render_env=True,
                       render_agent=False, cbar=True, update_display=False,
                       update_delay=None, **kwargs):
     interrupt = False
@@ -46,7 +44,7 @@ def plot_state_values(vtable, states=None, env=None,
             states = collect_states(env.single_plannable_state())
 
         value_array = get_state_value_array(
-            vtable, env.observation_space, states, default=default)
+            vtable, env.observation_space, states)
         low, high = env.observation_space.low, env.observation_space.high
         
         if ax is None and update_display:
@@ -97,7 +95,7 @@ def plot_state_values(vtable, states=None, env=None,
 
 def plot_action_values(
     qtable, states, env=None,
-    actions=[0, 1, 2, 3], default=0, ax=None,
+    actions=[0, 1, 2, 3], ax=None,
     cmap='OrRd', render_agent=False, render_env=True,
     temperature=10, update_display=False,
     update_delay=None, **kwargs
@@ -117,7 +115,7 @@ def plot_action_values(
         
         value_array = get_action_value_array(
             qtable, env.observation_space, states,
-            default=default, actions=actions)
+            actions=actions)
         
         if ax is None and update_display:
             fig = env.render_fig

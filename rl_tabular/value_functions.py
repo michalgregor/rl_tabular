@@ -127,18 +127,36 @@ class ActionValueTable(NumpyMixin):
         if key is None:
             key = slice(None)
 
-        if isinstance(key, tuple):
+        if isinstance(key, list):
+            key = [self._proc_key(k) for k in key]
+
+        elif isinstance(key, tuple):
             assert len(key) == 2
             s_key, a_key = key
             if s_key is None: s_key = slice(None)
             if a_key is None: a_key = slice(None)
             
-            if isinstance(s_key, slice):
+            if isinstance(s_key, list):
+                s_key = [
+                    self._proc_slice(k, self.state_key_func)
+                    if isinstance(k, slice)
+                    else self.state_key_func(k)
+                    for k in s_key
+                ]
+
+            elif isinstance(s_key, slice):
                 s_key = self._proc_slice(s_key, self.state_key_func)
             else:
                 s_key = self.state_key_func(s_key)
             
-            if isinstance(a_key, slice):
+            if isinstance(a_key, list):
+                a_key = [
+                    self._proc_slice(k, lambda x: x)
+                    if isinstance(k, slice) else k
+                    for k in a_key
+                ]
+            
+            elif isinstance(a_key, slice):
                 a_key = self._proc_slice(a_key, lambda x: x)
             
             key = s_key, a_key
@@ -151,34 +169,58 @@ class ActionValueTable(NumpyMixin):
         
         return key
     
-    def get(self, state=None, action=None, default=None):
-        key = self._proc_key((state, action))
-        
-        try:
-            return self._action_values.loc[key]
-        except KeyError:
-            return default
-    
     def __contains__(self, key):
         return self._proc_key(key) in self._action_values.index
+
+    def _reindex(self, keys):
+        keys = self._proc_key(keys)
+
+        if isinstance(keys, tuple):
+            assert(len(keys) == 2)
+            state_keys, action_keys = keys
+            state_keys_orig = state_keys
+        else:
+            state_keys = state_keys_orig = keys
+            action_keys = slice(None)
+            
+        if not isinstance(state_keys, list):
+            state_keys = [state_keys]
+        else:
+            state_keys_orig = np.asarray(state_keys_orig, dtype=object)
+
+        state_keys = self._action_values.index.__class__(state_keys)
+        missing_keys = state_keys.difference(self._action_values.index)
+
+        if len(missing_keys):
+            new_entries = pd.DataFrame(
+                np.full(
+                    (len(missing_keys), self._action_values.shape[1]),
+                    self.default_value
+                ), columns=self._action_values.columns, index=missing_keys
+            )
+
+            action_values = pd.concat([self._action_values, new_entries])
+        else:
+            action_values = self._action_values
+            
+        return action_values, state_keys_orig, action_keys
 
     def __getitem__(self, key):
         if self.default_value is None:
             return self._action_values.loc[self._proc_key(key)]
         else:
-            try:
-                return self._action_values.loc[self._proc_key(key)]
-            except KeyError:
-                return self.default_value
-    
+            action_values, state_keys, action_keys = self._reindex(key)
+            return action_values.loc[state_keys, action_keys]
+
     def __setitem__(self, key, value):
-        self._action_values.loc[self._proc_key(key)] = np.asarray(value, dtype=self.dtype)
-        if not self.default_value is None:
-            self._action_values.fillna(self.default_value, inplace=True)
+        self._action_values, state_keys, action_keys = self._reindex(key)
+        self._action_values.loc[state_keys, action_keys] = np.asarray(value, dtype=self.dtype)
     
     def __delitem__(self, key):
-        key = self._proc_key(key)
-        self._action_values.drop(index=[key], inplace=True)
+        keys = self._proc_key(key)
+        if isinstance(keys, tuple): raise ValueError("Only entire items can be deleted: i.e. key must not be a tuple.")
+        if not isinstance(keys, list): keys = [keys]
+        self._action_values.drop(index=keys, inplace=True)
         
     def remove(self, keys):
         self._action_values.drop(index=[self._proc_key(key) for key in keys], inplace=True)
@@ -280,16 +322,20 @@ class StateValueTable(NumpyMixin):
         if key is None:
             key = slice(None)
 
-        if isinstance(key, slice):
+        if isinstance(key, list):
+            key = [
+                self._proc_slice(k, self.state_key_func)
+                if isinstance(k, slice) else self.state_key_func(k)
+                for k in key
+            ]
+
+        elif isinstance(key, slice):
             key = self._proc_slice(key, self.state_key_func)
 
         else:
             key = self.state_key_func(key)
         
         return key
-    
-    def get(self, state=None, default=None):
-        return self._state_values.get(self._proc_key(state), default=default)
 
     def __contains__(self, key):
         return self._proc_key(key) in self._state_values.index
@@ -298,16 +344,33 @@ class StateValueTable(NumpyMixin):
         if self.default_value is None:
             return self._state_values.loc[self._proc_key(state)]
         else:
-            try:
-                return self._state_values.loc[self._proc_key(state)]
-            except KeyError:
-                return self.default_value
-    
+            keys = self._proc_key(state)
+            keys = self._state_values.index.__class__(keys)
+            missing_keys = keys.difference(self._state_values.index)
+
+            if len(missing_keys):
+                new_entries = pd.Series(self.default_value, index=missing_keys)
+                df = pd.concat([self._state_values, new_entries])
+                return df.loc[keys]
+            else:
+                return self._state_values.loc[keys]
+
     def __setitem__(self, state, value):
-        self._state_values.loc[self._proc_key(state)] = np.asarray(value, dtype=self.dtype)
+        keys = self._proc_key(state)
+
+        if isinstance(keys, list) and not self.default_value is None:
+            keys = self._state_values.index.__class__(keys)
+            missing_keys = keys.difference(self._state_values.index)
+            new_entries = pd.Series(self.default_value, index=missing_keys)
+            self._state_values = pd.concat([self._state_values, new_entries])
+            self._state_values.loc[keys] = np.asarray(value, dtype=self.dtype)
+        else:
+            self._state_values.loc[keys] = np.asarray(value, dtype=self.dtype)
     
     def __delitem__(self, state):
-        self._state_values.drop([self._proc_key(state)], inplace=True)
+        keys = self._proc_key(state)
+        if not isinstance(keys, list): keys = [keys]
+        self._state_values.drop(keys, inplace=True)
         
     def remove(self, states):
         self._state_values.drop([self._proc_key(state) for state in states], inplace=True)
