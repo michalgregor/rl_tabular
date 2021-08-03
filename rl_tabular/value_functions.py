@@ -1,5 +1,5 @@
+from .utils import OrderedSet
 import numpy as np
-import pandas as pd
 import copy
 
 def compute_action_value(state, action, vtable, discount=0.9):
@@ -19,39 +19,60 @@ def compute_opt_state_value(state, qtable):
 class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
     def __array__(self, dtype=None):
         assert dtype is None
-        return self.values()
+        return self.values
         
     def _join_index(self, table, index):
         if isinstance(table, self.__class__):
-            index = index.union(table.data.index)
+            index = index.union(table.index)
         return index
-    
+
     def _ufunc_unwrap(self, inputs, kwargs):
-        index = pd.Index([])
+        index = OrderedSet()
         for inp in inputs:
             index = self._join_index(inp, index)
 
-        inputs2 = [
-            inp.data.reindex(index, fill_value=inp.default_value, copy=False).values
+        inputs_unwrapped = [
+            inp.reindex(index)[1]
                 if isinstance(inp, self.__class__) else inp for inp in inputs
         ]
                                 
         outputs = kwargs.pop('out', None)
         
         if outputs:
-            outputs2 = []
+            outputs_unwrapped = []
             for out in outputs:
                 if isinstance(out, self.__class__):
-                    out.data = out.data.reindex(index,
-                        fill_value=out.default_value, copy=False
-                    )
-                    out = out.data.values
-                outputs2.append(out)
+                    out.reindex(index, inplace=True)
+                    out = out.values
+                outputs_unwrapped.append(out)
 
-            kwargs['out'] = tuple(outputs2)
+            kwargs['out'] = tuple(outputs_unwrapped)
         
-        return inputs2, kwargs, index
+        return inputs_unwrapped, kwargs, index
 
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
+        if method == '__call__' or method == 'accumulate':
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
+            func = getattr(ufunc, method)
+            
+            tmp_values, tmp_index = self.values, self.index
+            self.values, self.index = np.zeros(0), []
+            table = self.copy()
+            self.values, self.index = tmp_values, tmp_index
+
+            table.index = index
+            table.values = func(*inputs, **kwargs)
+            
+            return table
+        
+        elif method == 'reduce':
+            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
+            res = ufunc.reduce(*inputs, **kwargs)
+            return res
+            
+        else:
+            return NotImplemented
+    
 class StateKeyFunc:
     def __init__(self, obs_dtype=np.int32):
         self.dtype = obs_dtype
@@ -64,323 +85,129 @@ class StateKeyFunc:
         else:
             return np.asarray(s, dtype=self.dtype).tobytes()
 
-class ActionValueTable(NumpyMixin):
-    def __init__(
-        self, n_actions,
-        data=None, default_value=0,
-        state_key_func=StateKeyFunc(),
-        dtype=float
-    ):
-        self.n_actions = n_actions
-        self.state_key_func = state_key_func
-        self.default_value = default_value
-        self.dtype = dtype
-        
-        if data is None:
-            self._action_values = pd.DataFrame(
-                data=[], index=[],
-                columns=range(self.n_actions),
-                dtype=self.dtype
-            )
-        else:
-            self._action_values = data
-    
-    def copy(self):
-        return copy.deepcopy(self)
-
-    @property
-    def data(self):
-        return self._action_values
-
-    @data.setter
-    def data(self, value):
-        self._action_values = value
-
-    def keys(self):
-        return self._action_values.index
-
-    def values(self):
-        return self._action_values.values
-    
-    def items(self):
-        return self._action_values.items()
-    
-    def _proc_slice(self, s, key_func):
-        if not s.start is None:
-            start = key_func(s.start)
-        else:
-            start = s.start
-            
-        if not s.stop is None:
-            stop = key_func(s.stop)
-        else:
-            stop = s.stop
-            
-        if not s.step is None:
-            step = key_func(s.step)
-        else:
-            step = s.step
-        
-        return slice(start, stop, step)
-    
-    def _proc_key(self, key):
-        if key is None:
-            key = slice(None)
-
-        if isinstance(key, list):
-            key = [self._proc_key(k) for k in key]
-
-        elif isinstance(key, tuple):
-            assert len(key) == 2
-            s_key, a_key = key
-            if s_key is None: s_key = slice(None)
-            if a_key is None: a_key = slice(None)
-            
-            if isinstance(s_key, list):
-                s_key = [
-                    self._proc_slice(k, self.state_key_func)
-                    if isinstance(k, slice)
-                    else self.state_key_func(k)
-                    for k in s_key
-                ]
-
-            elif isinstance(s_key, slice):
-                s_key = self._proc_slice(s_key, self.state_key_func)
-            else:
-                s_key = self.state_key_func(s_key)
-            
-            if isinstance(a_key, list):
-                a_key = [
-                    self._proc_slice(k, lambda x: x)
-                    if isinstance(k, slice) else k
-                    for k in a_key
-                ]
-            
-            elif isinstance(a_key, slice):
-                a_key = self._proc_slice(a_key, lambda x: x)
-            
-            key = s_key, a_key
-                        
-        elif isinstance(key, slice):
-            key = self._proc_slice(key, self.state_key_func)
-
-        else:
-            key = self.state_key_func(key)
-        
-        return key
-    
-    def __contains__(self, key):
-        return self._proc_key(key) in self._action_values.index
-
-    def _reindex(self, keys):
-        keys = self._proc_key(keys)
-
-        if isinstance(keys, tuple):
-            assert(len(keys) == 2)
-            state_keys, action_keys = keys
-            state_keys_orig = state_keys
-        else:
-            state_keys = state_keys_orig = keys
-            action_keys = slice(None)
-            
-        if not isinstance(state_keys, list):
-            state_keys = [state_keys]
-        else:
-            state_keys_orig = np.asarray(state_keys_orig, dtype=object)
-
-        state_keys = self._action_values.index.__class__(state_keys)
-        missing_keys = state_keys.difference(self._action_values.index)
-
-        if len(missing_keys):
-            new_entries = pd.DataFrame(
-                np.full(
-                    (len(missing_keys), self._action_values.shape[1]),
-                    self.default_value
-                ), columns=self._action_values.columns, index=missing_keys
-            )
-
-            action_values = pd.concat([self._action_values, new_entries])
-        else:
-            action_values = self._action_values
-            
-        return action_values, state_keys_orig, action_keys
-
-    def __getitem__(self, key):
-        if self.default_value is None:
-            return self._action_values.loc[self._proc_key(key)]
-        else:
-            action_values, state_keys, action_keys = self._reindex(key)
-            return action_values.loc[state_keys, action_keys]
-
-    def __setitem__(self, key, value):
-        self._action_values, state_keys, action_keys = self._reindex(key)
-        self._action_values.loc[state_keys, action_keys] = np.asarray(value, dtype=self.dtype)
-    
-    def __delitem__(self, key):
-        keys = self._proc_key(key)
-        if isinstance(keys, tuple): raise ValueError("Only entire items can be deleted: i.e. key must not be a tuple.")
-        if not isinstance(keys, list): keys = [keys]
-        self._action_values.drop(index=keys, inplace=True)
-        
-    def remove(self, keys):
-        self._action_values.drop(index=[self._proc_key(key) for key in keys], inplace=True)
-
-    def __repr__(self):
-        return self._action_values.__repr__()
-    
-    def __len__(self):
-        return len(self._action_values)
-
-    def to_state_values(self):
-        vtable = StateValueTable()
-
-        for obs in self.keys():
-            vtable[obs] = compute_opt_state_value(obs, self)
-
-        return vtable
-
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
-        if method == '__call__' or method == 'accumulate':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
-            func = getattr(ufunc, method)
-                    
-            return self.__class__(
-                self.n_actions,
-                data=pd.DataFrame(
-                    data=func(*inputs, **kwargs),
-                    index=index,
-                    columns=range(self.n_actions),
-                    dtype=self.dtype
-                ),
-                default_value=self.default_value,
-                state_key_func=self.state_key_func
-            )
-        
-        elif method == 'reduce':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
-            res = ufunc.reduce(*inputs, **kwargs)
-            return res
-            
-        else:
-            return NotImplemented
-    
-class StateValueTable(NumpyMixin):
+class ValueTable(NumpyMixin):
     def __init__(
         self,
-        data=None, default_value=0, 
+        values,
+        index=None,
+        default_value=0,
         state_key_func=StateKeyFunc(),
-        dtype=float
+        auto_add_missing=False
     ):
-        self.state_key_func = state_key_func
-        self.default_value = default_value
-        self.dtype = dtype
-        
-        if data is None:
-            self._state_values = pd.Series(data=[], index=[], dtype=self.dtype)
+        if index is None:
+            self.index = OrderedSet()
         else:
-            self._state_values = data
+            self.index = OrderedSet(index)
+
+        self.values = values
+        self.default_value = default_value
+        self.state_key_func = state_key_func
+        self.auto_add_missing = auto_add_missing
+
+    def _proc_key(self, key, recurse=True):
+        rest = tuple()
+
+        if isinstance(key, list):
+            if not recurse: raise IndexError("A single key, not a list expected.")
+            key = [self._proc_key(k, recurse=False)[0] for k in key]
+        elif isinstance(key, tuple):
+            if not recurse: raise IndexError("Too many indices.")
+            key, rest = self._proc_key(key[0], recurse=True)[0], key[1:]
+            if not isinstance(rest, tuple): rest = tuple(rest)
+        else:
+            key = self.state_key_func(key)
+        
+        return key, rest
+
+    def reindex(self, keys, inplace=False):
+        ar_shape = tuple(self.values.shape[1:])
+        index = OrderedSet(keys)
+        values = np.empty(((len(index),) + ar_shape), dtype=self.values.dtype)
+
+        for i, k in enumerate(index):
+            ind = self.index.get(k)
+            if ind is None:
+                values[i] = np.full(ar_shape, self.default_value)
+            else:
+                values[i] = self.values[ind]
+
+        if inplace:
+            self.index = index
+            self.values = values
+
+        return index, values
+
+    def _union_reindex(self, keys):
+        keys_set = OrderedSet(keys)
+        missing_keys = keys_set.difference(self.index)
+
+        if len(missing_keys):
+            new_keys = missing_keys.union(self.index)
+            return self.reindex(new_keys)
+        else:
+            return self.index, self.values
+    
+    def _translate_keys(self, keys, index):
+        if isinstance(keys, list):
+            return [index.index(k) for k in keys]
+        else:
+            return index.index(keys)
+
+    def __getitem__(self, key):
+        keys, rest = self._proc_key(key)
+        keys_lst = keys if isinstance(keys, list) else [keys]
+        
+        if self.auto_add_missing:
+            self.index, self.values = index, values = self._union_reindex(keys_lst)
+        else:
+            index, values = self.reindex(keys_lst)
+
+        return values[(self._translate_keys(keys, index),) + rest]
+
+    def __setitem__(self, key, value):
+        keys, rest = self._proc_key(key)
+        keys_lst = keys if isinstance(keys, list) else [keys]
+        
+        self.index, self.values = self._union_reindex(keys_lst)
+        self.values[(self._translate_keys(keys, self.index),) + rest] = value
+
+    def __contains__(self, key):
+        key, _ = self._proc_key(key, recurse=False)
+        return key in self.index
+
+    def __delitem__(self, key):
+        keys, rest = self._proc_key(key)
+        if len(rest) != 0: raise IndexError("Too many index dimensions.")
+        keys = keys if isinstance(keys, list) else [keys]
+        keys = OrderedSet(keys)
+        remaining_index = OrderedSet(self.index).difference(keys)
+        self.reindex(remaining_index, inplace=True)
 
     def copy(self):
         return copy.deepcopy(self)
 
-    @property
-    def data(self):
-        return self._state_values
-
-    @data.setter
-    def data(self, value):
-        self._state_values = value
-
-    def keys(self):
-        return self._state_values.index
-
-    def values(self):
-        return self._state_values.values
-    
-    def items(self):
-        return self._state_values.items()
-    
-    def _proc_slice(self, s, key_func):
-        if not s.start is None:
-            start = key_func(s.start)
-        else:
-            start = s.start
-            
-        if not s.stop is None:
-            stop = key_func(s.stop)
-        else:
-            stop = s.stop
-            
-        if not s.step is None:
-            step = key_func(s.step)
-        else:
-            step = s.step
-        
-        return slice(start, stop, step)
-    
-    def _proc_key(self, key):
-        if key is None:
-            key = slice(None)
-
-        if isinstance(key, list):
-            key = [
-                self._proc_slice(k, self.state_key_func)
-                if isinstance(k, slice) else self.state_key_func(k)
-                for k in key
-            ]
-
-        elif isinstance(key, slice):
-            key = self._proc_slice(key, self.state_key_func)
-
-        else:
-            key = self.state_key_func(key)
-        
-        return key
-
-    def __contains__(self, key):
-        return self._proc_key(key) in self._state_values.index
-
-    def __getitem__(self, state):
-        if self.default_value is None:
-            return self._state_values.loc[self._proc_key(state)]
-        else:
-            keys = self._proc_key(state)
-            keys = self._state_values.index.__class__(keys)
-            missing_keys = keys.difference(self._state_values.index)
-
-            if len(missing_keys):
-                new_entries = pd.Series(self.default_value, index=missing_keys)
-                df = pd.concat([self._state_values, new_entries])
-                return df.loc[keys]
-            else:
-                return self._state_values.loc[keys]
-
-    def __setitem__(self, state, value):
-        keys = self._proc_key(state)
-
-        if isinstance(keys, list) and not self.default_value is None:
-            keys = self._state_values.index.__class__(keys)
-            missing_keys = keys.difference(self._state_values.index)
-            new_entries = pd.Series(self.default_value, index=missing_keys)
-            self._state_values = pd.concat([self._state_values, new_entries])
-            self._state_values.loc[keys] = np.asarray(value, dtype=self.dtype)
-        else:
-            self._state_values.loc[keys] = np.asarray(value, dtype=self.dtype)
-    
-    def __delitem__(self, state):
-        keys = self._proc_key(state)
-        if not isinstance(keys, list): keys = [keys]
-        self._state_values.drop(keys, inplace=True)
-        
-    def remove(self, states):
-        self._state_values.drop([self._proc_key(state) for state in states], inplace=True)
-
     def __repr__(self):
-        return self._state_values.__repr__()
+        repre = ""
+        for k, val in zip(self.index, self.values):
+            repre += k.__repr__() + ": " + val.__repr__() + "\n"
+        return repre
     
     def __len__(self):
-        return len(self._state_values)
-    
+        return len(self.values)
+
+class StateValueTable(ValueTable):
+    def __init__(
+        self,
+        default_value=0,
+        state_key_func=StateKeyFunc(),
+        auto_add_missing=False,
+        dtype=float
+    ):
+        super().__init__(np.zeros(0, dtype=dtype),
+                         default_value=default_value,
+                         state_key_func=state_key_func,
+                         auto_add_missing=auto_add_missing)
+
     def to_action_values(self, states, discount=0.9):
         n_actions = states[0].action_space.n
 
@@ -390,26 +217,25 @@ class StateValueTable(NumpyMixin):
             qtable[s] = [compute_action_value(s, a, self, discount) for a in range(n_actions)] 
 
         return qtable
-    
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
-        if method == '__call__' or method == 'accumulate':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
-            func = getattr(ufunc, method)
-            
-            return self.__class__(
-                data=pd.Series(
-                    data=func(*inputs, **kwargs),
-                    index=index,
-                    dtype=self.dtype
-                ),
-                default_value=self.default_value,
-                state_key_func=self.state_key_func
-            )
-        
-        elif method == 'reduce':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
-            res = ufunc.reduce(*inputs, **kwargs)
-            return res
-            
-        else:
-            return NotImplemented
+
+class ActionValueTable(ValueTable):
+    def __init__(
+        self,
+        n_actions,
+        default_value=0,
+        state_key_func=StateKeyFunc(),
+        auto_add_missing=False,
+        dtype=float
+    ):
+        super().__init__(np.zeros((0, n_actions), dtype=dtype),
+                         default_value=default_value,
+                         state_key_func=state_key_func,
+                         auto_add_missing=auto_add_missing)
+
+    def to_state_values(self):
+        vtable = StateValueTable()
+
+        for obs in self.index:
+            vtable[obs] = compute_opt_state_value(obs, self)
+
+        return vtable
