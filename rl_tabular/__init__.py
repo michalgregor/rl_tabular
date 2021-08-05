@@ -10,3 +10,5 @@ from .value_functions import (
 
 from .control import vtable_control, qtable_control, action_value_control
 from .states import collect_states
+from .policy import EpsGreedyPolicy, RandomPolicy
+from .replay_buffer import ReplayBuffer
