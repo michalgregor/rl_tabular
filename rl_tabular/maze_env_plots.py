@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from gym_plannable.env.grid_world import Actor, MazeEnv
 from .states import collect_states
+from .value_functions import StateValueTable, ActionValueTable
 
 def get_state_value_array(vtable, observation_space, states):
     low, high = observation_space.low, observation_space.high
@@ -16,23 +17,23 @@ def get_state_value_array(vtable, observation_space, states):
     return value_array
 
 def get_action_value_array(
-    qtable, observation_space, states,
-    actions=[0, 1, 2, 3]
+    qtable, observation_space, states, num_actions
 ):
     low, high = observation_space.low, observation_space.high
     span = high - low
     assert len(span) == 2
-    value_array = np.zeros(tuple(span) + (len(actions),))
+    value_array = np.zeros(tuple(span) + (num_actions,))
     
     for state in states:
-        for action in actions:
+        for action in range(num_actions):
             obs = state.observations() - low
             value_array[obs[0], obs[1], action] = qtable[state, action]
     return value_array
 
 def plot_state_values(vtable, states=None, env=None,
                       ax=None, cmap='OrRd', render_env=True,
-                      render_agent=False, cbar=True, update_display=False,
+                      render_agent=False, cbar=True, cax=None,
+                      update_display=False,
                       update_delay=None, **kwargs):
     interrupt = False
     try:
@@ -80,7 +81,10 @@ def plot_state_values(vtable, states=None, env=None,
                 m.norm.vmin = vmin
                 m.norm.vmax = vmin+1
             
-            fig.colorbar(ax=ax, mappable=m)
+            if cax is None:
+                fig.colorbar(ax=ax, mappable=m)
+            else:
+                fig.colorbar(cax=cax, mappable=m)
         
         if update_display:
             env.update_display(delay=update_delay)
@@ -95,17 +99,15 @@ def plot_state_values(vtable, states=None, env=None,
 
 def plot_action_values(
     qtable, states, env=None,
-    actions=[0, 1, 2, 3], ax=None,
+    action_spec=None, ax=None,
     cmap='OrRd', render_agent=False, render_env=True,
     temperature=10, update_display=False,
     update_delay=None, **kwargs
 ):
     interrupt = False
     try:
-        actionDirections = [
-            (-1, 0), (1, 0), (0, -1), (0, 1)
-        ]
-
+        action_spec = action_spec or env.action_spec
+        
         if env is None:
             env = MazeEnv()
             env.reset()
@@ -115,7 +117,7 @@ def plot_action_values(
         
         value_array = get_action_value_array(
             qtable, env.observation_space, states,
-            actions=actions)
+            num_actions=len(action_spec))
         
         if ax is None and update_display:
             fig = env.render_fig
@@ -149,7 +151,7 @@ def plot_action_values(
                 for ia, p in enumerate(scaled_probs):
                     arrow_size = p
                     arrow_length = 0.25 * arrow_size
-                    inc = actionDirections[ia]
+                    inc = action_spec[ia]
                     
                     if arrow_size != 0:
                         ax.arrow(posY, posX,
@@ -168,4 +170,75 @@ def plot_action_values(
 
     if interrupt:
         raise KeyboardInterrupt()
-    
+
+class Plotter:
+    def __init__(self, env, *args, figsize=None, **kwargs):
+        self.env = env
+        self.tab_kwargs = []
+        self.tab_func = []
+        self.tab_axes = []
+        self.states = collect_states(env.single_plannable_state())
+
+        if not figsize is None:
+            self.env.render_fig.set_size_inches(figsize)
+        
+        ax_spec = []
+        for tab_type in args:
+            if isinstance(tab_type, tuple):
+                tab_type, _ = tab_type
+
+            if tab_type == StateValueTable:
+                ax_spec.extend((1, 0.025)) # for ax and cax
+            elif tab_type == ActionValueTable:
+                ax_spec.append(1) # for ax
+            else:
+                raise TypeError(f"Unknown type of table '{tab_type}'.")
+
+        axes = self.env.render_fig.subplots(
+            1, len(ax_spec), gridspec_kw={'width_ratios': ax_spec}
+        )
+        iax = 0
+
+        for tab_type in args:
+            if isinstance(tab_type, tuple):
+                tab_type, inst_kwargs = tab_type
+            else:
+                inst_kwargs = {}
+
+            tab_kwargs = {'env': self.env, 'render_agent': True,
+                          'update_display': False, 'states': self.states}
+
+            if tab_type == StateValueTable:
+                self.tab_func.append(plot_state_values)
+                self.tab_axes.append((axes[iax], axes[iax+1]))
+                tab_kwargs.update({'ax': axes[iax], 'cax': axes[iax+1]})
+                iax += 2
+            elif tab_type == ActionValueTable:
+                self.tab_func.append(plot_action_values)
+                self.tab_axes.append((axes[iax],))
+                tab_kwargs.update({'ax': axes[iax]})
+                iax += 1
+            else:
+                raise TypeError(f"Unexpected type '{tab_type}'.")
+
+            tab_kwargs.update(kwargs)
+            tab_kwargs.update(inst_kwargs)
+            self.tab_kwargs.append(tab_kwargs)
+
+        self.tab_kwargs[-1].update({'update_display': True})
+
+    def plot(self, *args, **kwargs):
+        for tab, func, tab_kwargs, axes in zip(
+            args, self.tab_func, self.tab_kwargs, self.tab_axes
+        ):
+            if isinstance(tab, tuple):
+                tab, inst_kwargs = tab
+            else:
+                inst_kwargs = {}
+
+            tab_kwargs = tab_kwargs.copy()
+            tab_kwargs.update(kwargs)
+            tab_kwargs.update(inst_kwargs)
+
+            for ax in axes: ax.clear()
+            func(tab, **tab_kwargs)
