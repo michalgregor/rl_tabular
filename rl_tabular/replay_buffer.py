@@ -14,10 +14,14 @@ class ReplayBuffer:
         done = False
         
         for i in range(batch_size):
-            if done: env.reset()
+            if done:
+                obs = env.reset()
+
             a = policy(obs)
+
             obs_next, reward, done, _ = env.step(a)
             self.buffer.append((obs, a, reward, obs_next, done))
+            obs = obs_next
             
     def add(self, obs, a, reward, obs_next, done):
         self.buffer.append((obs, a, reward, obs_next, done))
