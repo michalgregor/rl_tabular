@@ -13,9 +13,13 @@ def compute_action_value(state, action, vtable, discount=0.9):
         
     return val
 
-def compute_opt_state_value(state, qtable):
-    return np.max(qtable[state, :])
-    
+def compute_state_value(state, qtable, policy=None):
+    if policy is None:
+        return np.max(qtable[state, :])
+    else:
+        proba = policy.proba(state)
+        return (qtable[state, :] * proba).sum()
+        
 class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
     def __array__(self, dtype=None):
         assert dtype is None
@@ -103,6 +107,10 @@ class ValueTable(NumpyMixin):
         self.default_value = default_value
         self.state_key_func = state_key_func
         self.auto_add_missing = auto_add_missing
+
+    @property
+    def shape(self):
+        return self.values.shape
 
     def _proc_key(self, key, recurse=True):
         rest = tuple()
@@ -231,11 +239,12 @@ class ActionValueTable(ValueTable):
                          default_value=default_value,
                          state_key_func=state_key_func,
                          auto_add_missing=auto_add_missing)
+        self.n_actions = n_actions
 
-    def to_state_values(self):
+    def to_state_values(self, policy=None):
         vtable = StateValueTable()
 
         for obs in self.index:
-            vtable[obs] = compute_opt_state_value(obs, self)
+            vtable[obs] = compute_state_value(obs, self, policy=policy)
 
         return vtable
