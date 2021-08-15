@@ -3,33 +3,35 @@ from .policy import RandomPolicy
 import numpy as np
 
 class ReplayBuffer:
-    def __init__(self, max_size):
+    def __init__(self, max_size, batch_size=100):
         self.buffer = RingBuffer(max_size, dtype=object)
+        self.batch_size = batch_size
 
-    def prefill(self, env, batch_size, policy=None):
+    def prefill(self, env, prefill_size, policy=None):
         if policy is None:
             policy = RandomPolicy(env.action_space)
         
         obs = env.reset()
         done = False
         
-        for i in range(batch_size):
+        for i in range(prefill_size):
             if done:
                 obs = env.reset()
 
             a = policy(obs)
 
-            obs_next, reward, done, _ = env.step(a)
-            self.buffer.append((obs, a, reward, obs_next, done))
+            obs_next, reward, done, info = env.step(a)
+            self.buffer.append((obs, a, reward, obs_next, done, info))
             obs = obs_next
             
-    def add(self, obs, a, reward, obs_next, done):
-        self.buffer.append((obs, a, reward, obs_next, done))
+    def add(self, obs, a, reward, obs_next, done, info):
+        self.buffer.append((obs, a, reward, obs_next, done, info))
         
     def add_batch(self, batch):
         self.buffer.extend(batch)
         
-    def sample(self, batch_size):
+    def sample(self, batch_size=None):
+        batch_size = batch_size or self.batch_size
         rand_index = np.random.randint(0, len(self.buffer), batch_size)
         return self.get(rand_index)
     
@@ -42,8 +44,9 @@ class ReplayBuffer:
         reward = batch[:, 2].astype(float)
         obs_next = list(batch[:, 3])
         done = batch[:, 4].astype(bool)
+        info = batch[:, 5]
         
-        return obs, a, reward, obs_next, done
+        return obs, a, reward, obs_next, done, info
     
     def __len__(self):
         return len(self.buffer)

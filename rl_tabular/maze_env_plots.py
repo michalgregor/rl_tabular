@@ -34,8 +34,10 @@ def plot_state_values(vtable, states=None, env=None,
                       ax=None, cmap='OrRd', render_env=True,
                       render_agent=False, cbar=True, cax=None,
                       update_display=False,
-                      update_delay=None, **kwargs):
+                      update_delay=None, render_kwargs=None, **kwargs):
     interrupt = False
+    render_kwargs = render_kwargs or dict()
+
     try:
         if env is None:
             env = MazeEnv()
@@ -66,10 +68,12 @@ def plot_state_values(vtable, states=None, env=None,
                 state = env.single_plannable_state()
                 render_sequence = [obj for obj in state.render_sequence if not isinstance(obj, Actor)]
             
-            env.render(fig=fig, ax=ax, render_sequence=render_sequence)
+            render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
+            render_kwargs_tmp.update(render_kwargs)
+            env.render(**render_kwargs_tmp)
         
         m = ax.matshow(value_array,
-            extent=(low[0]-0.5, high[0]-0.5, high[1]-0.5, low[1]-0.5),
+            extent=(low[1]-0.5, high[1]-0.5, high[0]-0.5, low[0]-0.5),
             cmap=cmap, **kwargs
         )
         
@@ -102,9 +106,11 @@ def plot_action_values(
     action_spec=None, ax=None,
     cmap='OrRd', render_agent=False, render_env=True,
     temperature=10, update_display=False,
-    update_delay=None, **kwargs
+    update_delay=None, render_kwargs=None, **kwargs
 ):
     interrupt = False
+    render_kwargs = render_kwargs or dict()
+
     try:
         action_spec = action_spec or env.action_spec
         
@@ -137,7 +143,10 @@ def plot_action_values(
                 state = env.single_plannable_state()
                 render_sequence = [obj for obj in state.render_sequence if not isinstance(obj, Actor)]
         
-            env.render(fig=fig, ax=ax, render_sequence=render_sequence)       
+            render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
+            render_kwargs_tmp.update(render_kwargs)
+
+            env.render(**render_kwargs_tmp)       
         
         for posX in range(value_array.shape[0]):
             for posY in range(value_array.shape[1]):
@@ -172,7 +181,7 @@ def plot_action_values(
         raise KeyboardInterrupt()
 
 class Plotter:
-    def __init__(self, env, *args, figsize=None, **kwargs):
+    def __init__(self, env, *args, figsize=None, update_display=True,**kwargs):
         self.env = env
         self.tab_kwargs = []
         self.tab_func = []
@@ -197,6 +206,8 @@ class Plotter:
         axes = self.env.render_fig.subplots(
             1, len(ax_spec), gridspec_kw={'width_ratios': ax_spec}
         )
+
+        if len(ax_spec) == 1: axes = [axes]
         iax = 0
 
         for tab_type in args:
@@ -225,7 +236,7 @@ class Plotter:
             tab_kwargs.update(inst_kwargs)
             self.tab_kwargs.append(tab_kwargs)
 
-        self.tab_kwargs[-1].update({'update_display': True})
+        self.tab_kwargs[-1].update({'update_display': update_display})
 
     def plot(self, *args, **kwargs):
         for tab, func, tab_kwargs, axes in zip(

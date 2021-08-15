@@ -30,47 +30,42 @@ class NumpyMixin(np.lib.mixins.NDArrayOperatorsMixin):
             index = index.union(table.index)
         return index
 
-    def _ufunc_unwrap(self, inputs, kwargs):
-        index = OrderedSet()
-        for inp in inputs:
-            index = self._join_index(inp, index)
+    def _ufunc_unwrap(self, inputs, index=None, inplace=False):
+        if index is None:
+            index = OrderedSet()
+            for inp in inputs:
+                index = self._join_index(inp, index)
 
         inputs_unwrapped = [
-            inp.reindex(index)[1]
-                if isinstance(inp, self.__class__) else inp for inp in inputs
+            inp.reindex(index, inplace=inplace)[1]
+                if isinstance(inp, self.__class__)
+                else inp for inp in inputs
         ]
-                                
-        outputs = kwargs.pop('out', None)
-        
-        if outputs:
-            outputs_unwrapped = []
-            for out in outputs:
-                if isinstance(out, self.__class__):
-                    out.reindex(index, inplace=True)
-                    out = out.values
-                outputs_unwrapped.append(out)
 
-            kwargs['out'] = tuple(outputs_unwrapped)
-        
-        return inputs_unwrapped, kwargs, index
+        return inputs_unwrapped, index
 
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):        
         if method == '__call__' or method == 'accumulate':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
+            inputs, index = self._ufunc_unwrap(inputs)
             func = getattr(ufunc, method)
             
-            tmp_values, tmp_index = self.values, self.index
-            self.values, self.index = np.zeros(0), []
-            table = self.copy()
-            self.values, self.index = tmp_values, tmp_index
+            outputs = kwargs.pop('out', None)
+            if outputs:
+                assert(len(outputs) == 1)
+                table = outputs[0]
+                table.reindex(index, inplace=True)
+            else:
+                tmp_values, tmp_index = self.values, self.index
+                self.values, self.index = np.zeros(0), []
+                table = self.copy()
+                self.values, self.index = tmp_values, tmp_index
+                table.index = index
 
-            table.index = index
             table.values = func(*inputs, **kwargs)
-            
             return table
         
         elif method == 'reduce':
-            inputs, kwargs, index = self._ufunc_unwrap(inputs, kwargs)
+            inputs, index = self._ufunc_unwrap(inputs)
             res = ufunc.reduce(*inputs, **kwargs)
             return res
             

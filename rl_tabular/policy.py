@@ -2,11 +2,14 @@ import random
 import numpy as np
 
 class EpsGreedyPolicy:
-    def __init__(self, qtable, n_actions, epsilon):
+    def __init__(self, qtable, n_actions, epsilon=0.1):
         self.n_actions = n_actions
         self.epsilon = epsilon
         self.qtable = qtable
         
+    def set_epsilon(self, epsilon):
+        self.epsilon = epsilon
+
     def __call__(self, obs, return_is_greedy=False):
         if random.random() < self.epsilon:
             if return_is_greedy:
