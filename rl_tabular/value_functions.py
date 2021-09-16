@@ -9,7 +9,7 @@ def compute_action_value(state, action, vtable, discount=0.9):
     val = 0
     
     for next_state, prob in state.all_next(action):
-        val += prob * (next_state.rewards() + discount * vtable[next_state])
+        val += prob * (next_state.reward() + discount * vtable[next_state])
         
     return val
 
@@ -77,8 +77,8 @@ class StateKeyFunc:
         self.dtype = obs_dtype
 
     def __call__(self, s):
-        if hasattr(s, "observations"):
-            return np.asarray(s.observations(), dtype=self.dtype).tobytes()
+        if hasattr(s, "observation"):
+            return np.asarray(s.observation(), dtype=self.dtype).tobytes()
         elif isinstance(s, bytes):
             return s
         else:

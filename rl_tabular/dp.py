@@ -20,7 +20,7 @@ def value_iteration(
                 val = 0
                 
                 for next_state, prob in state.all_next(a):
-                    r = next_state.rewards()
+                    r = next_state.reward()
                     val += prob * (r + discount*vtable[next_state])
                     
                 maxval = max(val, maxval)

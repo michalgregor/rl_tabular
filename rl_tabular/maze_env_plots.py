@@ -11,7 +11,7 @@ def get_state_value_array(vtable, observation_space, states):
     value_array = np.zeros(span)
     
     for state in states:
-        obs = state.observations() - low
+        obs = state.observation() - low
         value_array[obs[0], obs[1]] = vtable[state]
         
     return value_array
@@ -26,7 +26,7 @@ def get_action_value_array(
     
     for state in states:
         for action in range(num_actions):
-            obs = state.observations() - low
+            obs = state.observation() - low
             value_array[obs[0], obs[1], action] = qtable[state, action]
     return value_array
 

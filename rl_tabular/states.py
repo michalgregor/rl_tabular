@@ -2,7 +2,7 @@ import numpy as np
 
 def collect_states(
     plannable_state,
-    state_key_func=lambda s: np.asarray(s.observations()).tobytes()
+    state_key_func=lambda s: np.asarray(s.observation()).tobytes()
 ):
     """
     Returns the list of all states reachable from

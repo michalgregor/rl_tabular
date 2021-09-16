@@ -14,7 +14,7 @@ class Trainer:
     def __init__(
         self, algo, policy=None, replay_buffer=None,
         on_begin_episode=None, on_end_episode=None,
-        on_begin_step=None, on_end_step=None, verbose=True
+        on_begin_step=None, on_end_step=None, verbose=1
     ):
         self.algo = algo
         self.policy = policy
@@ -77,7 +77,7 @@ class Trainer:
                     if ti.starting:
                         ti.starting = False
                     else:
-                        if self.verbose:
+                        if ti.episode % self.verbose == 0:
                             print(f"Episode {ti.episode} finished after {ti.episode_step} steps. Taken the total of {ti.step} steps.")
 
                         for callback in self.on_end_episode:
