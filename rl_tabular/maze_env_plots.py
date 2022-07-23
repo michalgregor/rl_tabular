@@ -56,15 +56,31 @@ def plot_path(
     path, tile_size=1,
     show_arrows=True, arrow_color='black', arrow_alpha=1.0,
     show_visited=False, visited_color='blue', visited_alpha=0.1,
-    ax=None, env=None, render_env=True, render_agent=False, render_kwargs=None,
+    ax=None, env=None, render_env=True, render_agent=False,
+    render_kwargs=None, arrow_kwargs=None, visited_kwargs=None,
 ):
-    render_kwargs = render_kwargs or dict()
+    render_kwargs = dict(dict(
+        env=env, ax=ax, render_agent=render_agent
+    ), **(render_kwargs or {}))
+
+    arrow_kwargs = dict(dict(
+        zorder=5,
+        scale_units='xy',
+        scale=tile_size,
+        color=arrow_color,
+        alpha=arrow_alpha,
+    ), **(arrow_kwargs or dict()))
+
+    visited_kwargs = dict(dict(
+        facecolor=visited_color,
+        alpha=visited_alpha
+    ), **(visited_kwargs or dict()))
 
     if ax is None:
         ax = plt.gca()
 
     if render_env:
-        plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)
+        plot_env(**render_kwargs)
 
     if show_arrows:
         path = np.asarray(path)
@@ -74,14 +90,7 @@ def plot_path(
         U = path[1:, 1] - path[:-1, 1]
         V = path[:-1, 0] - path[1:, 0]
 
-        ax.quiver(
-            X, Y, U, V,
-            scale_units='xy',
-            scale=tile_size,
-            color=arrow_color,
-            alpha=arrow_alpha,
-            zorder=5
-        )
+        ax.quiver(X, Y, U, V, **arrow_kwargs)
 
     if show_visited:
         for r, c in path:
@@ -89,8 +98,7 @@ def plot_path(
                 [c - tile_size / 2,
                 r - tile_size / 2],
                 tile_size, tile_size,
-                facecolor=visited_color,
-                alpha=visited_alpha
+                **visited_kwargs
             )
             ax.add_patch(patch)
 
