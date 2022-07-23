@@ -4,6 +4,46 @@ from gym_plannable.env.grid_world import Actor, MazeEnv
 from .states import collect_states
 from .value_functions import StateValueTable, ActionValueTable
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_path(
+    path, tile_size=1,
+    show_arrows=True, arrow_color='black', arrow_alpha=1.0,
+    show_visited=False, visited_color='blue', visited_alpha=0.1,
+    ax=None
+):
+    if ax is None:
+        ax = plt.gca()
+
+    if show_arrows:
+        path = np.asarray(path)
+
+        X = path[:-1, 1]
+        Y = path[:-1, 0]
+        U = path[1:, 1] - path[:-1, 1]
+        V = path[:-1, 0] - path[1:, 0]
+
+        ax.quiver(
+            X, Y, U, V,
+            scale_units='xy',
+            scale=tile_size,
+            color=arrow_color,
+            alpha=arrow_alpha,
+            zorder=5
+        )
+
+    if show_visited:
+        for r, c in path:
+            patch = plt.Rectangle(
+                [c - tile_size / 2,
+                r - tile_size / 2],
+                tile_size, tile_size,
+                facecolor=visited_color,
+                alpha=visited_alpha
+            )
+            ax.add_patch(patch)
+            
 def get_state_value_array(vtable, observation_space, states):
     low, high = observation_space.low, observation_space.high
     span = high - low
