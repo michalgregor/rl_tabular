@@ -6,15 +6,65 @@ from .value_functions import StateValueTable, ActionValueTable
 
 import matplotlib.pyplot as plt
 import numpy as np
+            
+def get_state_value_array(vtable, observation_space, states):
+    low, high = observation_space.low, observation_space.high
+    span = high - low
+    assert len(span) == 2
+    value_array = np.zeros(span)
+    
+    for state in states:
+        obs = state.observation() - low
+        value_array[obs[0], obs[1]] = vtable[state]
+        
+    return value_array
+
+def get_action_value_array(
+    qtable, observation_space, states, num_actions
+):
+    low, high = observation_space.low, observation_space.high
+    span = high - low
+    assert len(span) == 2
+    value_array = np.zeros(tuple(span) + (num_actions,))
+    
+    for state in states:
+        for action in range(num_actions):
+            obs = state.observation() - low
+            value_array[obs[0], obs[1], action] = qtable[state, action]
+    return value_array
+
+def plot_env(env=None, ax=None, fig=None, render_agent=False, **render_kwargs):
+    if env is None:
+        env = MazeEnv()
+        env.reset()
+
+    if ax is None:
+        ax = plt.gca()
+        fig = ax.get_figure()
+
+    if render_agent:
+        render_sequence = None
+    else:
+        state = env.single_plannable_state()
+        render_sequence = [obj for obj in state.render_sequence if not isinstance(obj, Actor)]
+    
+    render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
+    render_kwargs_tmp.update(render_kwargs)
+    env.render(**render_kwargs_tmp)
 
 def plot_path(
     path, tile_size=1,
     show_arrows=True, arrow_color='black', arrow_alpha=1.0,
     show_visited=False, visited_color='blue', visited_alpha=0.1,
-    ax=None
+    ax=None, env=None, render_env=True, render_agent=False, render_kwargs=None,
 ):
+    render_kwargs = render_kwargs or dict()
+
     if ax is None:
         ax = plt.gca()
+
+    if render_env:
+        plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)
 
     if show_arrows:
         path = np.asarray(path)
@@ -43,32 +93,6 @@ def plot_path(
                 alpha=visited_alpha
             )
             ax.add_patch(patch)
-            
-def get_state_value_array(vtable, observation_space, states):
-    low, high = observation_space.low, observation_space.high
-    span = high - low
-    assert len(span) == 2
-    value_array = np.zeros(span)
-    
-    for state in states:
-        obs = state.observation() - low
-        value_array[obs[0], obs[1]] = vtable[state]
-        
-    return value_array
-
-def get_action_value_array(
-    qtable, observation_space, states, num_actions
-):
-    low, high = observation_space.low, observation_space.high
-    span = high - low
-    assert len(span) == 2
-    value_array = np.zeros(tuple(span) + (num_actions,))
-    
-    for state in states:
-        for action in range(num_actions):
-            obs = state.observation() - low
-            value_array[obs[0], obs[1], action] = qtable[state, action]
-    return value_array
 
 def plot_state_values(vtable, states=None, env=None,
                       ax=None, cmap='OrRd', render_env=True,
@@ -102,15 +126,7 @@ def plot_state_values(vtable, states=None, env=None,
         fig = ax.get_figure()
             
         if render_env:
-            if render_agent:
-                render_sequence = None
-            else:
-                state = env.single_plannable_state()
-                render_sequence = [obj for obj in state.render_sequence if not isinstance(obj, Actor)]
-            
-            render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
-            render_kwargs_tmp.update(render_kwargs)
-            env.render(**render_kwargs_tmp)
+            plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)
         
         m = ax.matshow(value_array,
             extent=(low[1]-0.5, high[1]-0.5, high[0]-0.5, low[0]-0.5),
@@ -177,16 +193,7 @@ def plot_action_values(
         fig = ax.get_figure()
             
         if render_env:
-            if render_agent:
-                render_sequence = None
-            else:
-                state = env.single_plannable_state()
-                render_sequence = [obj for obj in state.render_sequence if not isinstance(obj, Actor)]
-        
-            render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
-            render_kwargs_tmp.update(render_kwargs)
-
-            env.render(**render_kwargs_tmp)       
+            plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)  
         
         for posX in range(value_array.shape[0]):
             for posY in range(value_array.shape[1]):
