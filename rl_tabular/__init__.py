@@ -5,7 +5,7 @@ VERSION = "0.1"
 from .dp import value_iteration
 from .value_functions import (
     compute_action_value, compute_state_value,
-    StateValueTable, ActionValueTable
+    StateValueTable, ActionValueTable, StateKeyFunc
 )
 
 from .control import vtable_control, qtable_control, action_value_control
