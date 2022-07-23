@@ -198,6 +198,9 @@ class ValueTable(NumpyMixin):
     def __len__(self):
         return len(self.values)
 
+    def __iter__(self):
+        return zip(self.index, self.values)
+
 class StateValueTable(ValueTable):
     def __init__(
         self,
