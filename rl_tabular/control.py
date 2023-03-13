@@ -1,11 +1,8 @@
 from .value_functions import compute_action_value
 import numpy as np
 
-def action_value_control(env, action_val_func, render=True, max_steps=None):
+def action_value_control(env, action_val_func, max_steps=None):
     env.reset()
-
-    if render:
-        env.render()
 
     step = 0
     done = False
@@ -21,11 +18,10 @@ def action_value_control(env, action_val_func, render=True, max_steps=None):
                 maxval = val
                 maxa = a
 
-        obs, reward, done, info = env.step(maxa)
+        obs, reward, terminated, truncated, info = env.step(maxa)
+        done = terminated or truncated
 
         step += 1
-        if render:
-            env.render()
 
 def qtable_control(env, qtable, **kwargs):
     return action_value_control(env, lambda state, a: qtable[state, a], **kwargs)

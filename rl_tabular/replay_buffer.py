@@ -11,16 +11,17 @@ class ReplayBuffer:
         if policy is None:
             policy = RandomPolicy(env.action_space)
         
-        obs = env.reset()
+        obs, info = env.reset()
         done = False
         
         for i in range(prefill_size):
             if done:
-                obs = env.reset()
+                obs, info = env.reset()
 
             a = policy(obs)
 
-            obs_next, reward, done, info = env.step(a)
+            obs_next, reward, terminated, truncated, info = env.step(a)
+            done = terminated or truncated
             self.buffer.append((obs, a, reward, obs_next, done, info))
             obs = obs_next
             

@@ -50,6 +50,7 @@ def plot_env(env=None, ax=None, fig=None, render_agent=False, **render_kwargs):
     
     render_kwargs_tmp = dict(fig=fig, ax=ax, render_sequence=render_sequence)
     render_kwargs_tmp.update(render_kwargs)
+
     env.render(**render_kwargs_tmp)
 
 def plot_path(
@@ -134,7 +135,7 @@ def plot_state_values(vtable, states=None, env=None,
         fig = ax.get_figure()
             
         if render_env:
-            plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)
+            plot_env(env=env, ax=ax, fig=fig, render_agent=render_agent, **render_kwargs)
         
         m = ax.matshow(value_array,
             extent=(low[1]-0.5, high[1]-0.5, high[0]-0.5, low[0]-0.5),
@@ -201,7 +202,7 @@ def plot_action_values(
         fig = ax.get_figure()
             
         if render_env:
-            plot_env(env=env, ax=ax, render_agent=render_agent, **render_kwargs)  
+            plot_env(env=env, ax=ax, render_agent=render_agent, fig=fig, **render_kwargs)  
         
         for posX in range(value_array.shape[0]):
             for posY in range(value_array.shape[1]):
@@ -293,7 +294,7 @@ class Plotter:
 
         self.tab_kwargs[-1].update({'update_display': update_display})
 
-    def plot(self, *args, **kwargs):
+    def plot(self, *args, **kwargs):    
         for tab, func, tab_kwargs, axes in zip(
             args, self.tab_func, self.tab_kwargs, self.tab_axes
         ):

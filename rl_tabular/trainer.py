@@ -90,7 +90,7 @@ class Trainer:
                     ):
                         break
 
-                    ti.obs = ti.env.reset()
+                    ti.obs, _ = ti.env.reset()
                     ti.done = False
                     ti.episode_step = 0
                     ti.interrupted = False
@@ -112,7 +112,8 @@ class Trainer:
                 else:
                     a = next(actions)
 
-                obs_next, reward, ti.done, info = ti.env.step(a)
+                obs_next, reward, terminated, truncated, info = ti.env.step(a)
+                ti.done = terminated or truncated
                 ti.transition = (ti.obs, a, reward, obs_next, ti.done, info)
                 self.replay_buffer.add(*ti.transition)
                 batch = self.replay_buffer.sample(batch_size=ti.batch_size)
